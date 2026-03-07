@@ -1,0 +1,159 @@
+using DrWatson
+@quickactivate "project"
+
+using DifferentialEquations
+using DataFrames
+using StatsPlots
+using LaTeXStrings
+using Plots
+using Statistics
+using FFTW
+
+# Настройка директорий
+script_name = splitext(basename(PROGRAM_FILE))[1]
+mkpath(plotsdir(script_name))
+mkpath(datadir(script_name))
+
+# ----------------------------------------------------------------------
+# Модель Лотки–Вольтерры
+# ----------------------------------------------------------------------
+function lotka_volterra!(du, u, p, t)
+    x, y = u
+    α, β, δ, γ = p
+
+    @inbounds begin
+        du[1] = α * x - β * x * y
+        du[2] = δ * x * y - γ * y
+    end
+
+    return nothing
+end
+
+# ----------------------------------------------------------------------
+# Базовые начальные условия и время
+# ----------------------------------------------------------------------
+u0_lv = [40.0, 9.0]
+tspan_lv = (0.0, 200.0)
+dt_lv = 0.01
+
+# ----------------------------------------------------------------------
+# Набор параметров α
+# ----------------------------------------------------------------------
+α_values = [0.05, 0.10, 0.20]
+
+for α in α_values
+    println("\n" * "="^60)
+    println("Расчёт для α = ", α)
+    println("="^60)
+
+    p_lv = [
+        α,    # α: скорость размножения жертв
+        0.02, # β: скорость поедания жертв хищниками
+        0.01, # δ: коэффициент конверсии пищи в хищников
+        0.3   # γ: смертность хищников
+    ]
+
+    # ------------------------------------------------------------------
+    # Решение системы
+    # ------------------------------------------------------------------
+    prob_lv = ODEProblem(lotka_volterra!, u0_lv, tspan_lv, p_lv)
+
+    sol_lv = solve(
+        prob_lv,
+        Tsit5();
+        dt = dt_lv,
+        reltol = 1e-8,
+        abstol = 1e-10,
+        saveat = 0.1,
+        dense = true
+    )
+
+    # ------------------------------------------------------------------
+    # Подготовка данных
+    # ------------------------------------------------------------------
+    df_lv = DataFrame()
+    df_lv[!, :t] = sol_lv.t
+    df_lv[!, :prey] = [u[1] for u in sol_lv.u]
+    df_lv[!, :predator] = [u[2] for u in sol_lv.u]
+
+    # Стационарные точки
+    x_star = p_lv[4] / p_lv[3]
+    y_star = p_lv[1] / p_lv[2]
+
+    println("Параметры модели:")
+    println("α = ", p_lv[1])
+    println("β = ", p_lv[2])
+    println("δ = ", p_lv[3])
+    println("γ = ", p_lv[4])
+
+    println("\nНачальные условия:")
+    println("Жертвы (x0) = ", u0_lv[1])
+    println("Хищники (y0) = ", u0_lv[2])
+
+    println("\nСтационарные точки:")
+    println("x* = γ/δ = ", round(x_star, digits = 3))
+    println("y* = α/β = ", round(y_star, digits = 3))
+
+    # ------------------------------------------------------------------
+    # График 1: динамика популяций
+    # ------------------------------------------------------------------
+    plt1 = plot(
+        df_lv.t,
+        [df_lv.prey df_lv.predator],
+        label = [L"Жертвы (x)" L"Хищники (y)"],
+        xlabel = "Время",
+        ylabel = "Популяция",
+        title = "Лотка-Вольтерра: динамика популяций (α=$(α))",
+        linewidth = 2,
+        legend = :topright,
+        grid = true,
+        size = (900, 500),
+        color = [:green :red]
+    )
+
+    hline!(plt1, [x_star], color = :green, linestyle = :dash, alpha = 0.5, label = "x*")
+    hline!(plt1, [y_star], color = :red, linestyle = :dash, alpha = 0.5, label = "y*")
+
+    # ------------------------------------------------------------------
+    # График 2: фазовый портрет
+    # ------------------------------------------------------------------
+    plt2 = plot(
+        df_lv.prey,
+        df_lv.predator,
+        label = "Фазовая траектория",
+        xlabel = "Популяция жертв (x)",
+        ylabel = "Популяция хищников (y)",
+        title = "Фазовый портрет (α=$(α))",
+        color = :blue,
+        linewidth = 1.5,
+        grid = true,
+        size = (800, 600),
+        legend = :topright
+    )
+
+    scatter!(plt2, [x_star], [y_star], color = :black, markersize = 8, label = "Стационарная точка")
+
+    display(plt1)
+    display(plt2)
+
+    α_str = replace(string(α), "." => "_")
+    savefig(plt1, plotsdir(script_name, "lv_dynamics_alpha_$(α_str).png"))
+    savefig(plt2, plotsdir(script_name, "lv_phase_alpha_$(α_str).png"))
+
+    # ------------------------------------------------------------------
+    # Краткий анализ
+    # ------------------------------------------------------------------
+    println("\nОсновные статистики:")
+    println(
+        "Жертвы: min = ", round(minimum(df_lv.prey), digits = 2),
+        ", max = ", round(maximum(df_lv.prey), digits = 2),
+        ", mean = ", round(mean(df_lv.prey), digits = 2)
+    )
+    println(
+        "Хищники: min = ", round(minimum(df_lv.predator), digits = 2),
+        ", max = ", round(maximum(df_lv.predator), digits = 2),
+        ", mean = ", round(mean(df_lv.predator), digits = 2)
+    )
+end
+
+println("\nМоделирование завершено успешно!")
