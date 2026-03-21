@@ -1,0 +1,147 @@
+# # Влияние светимости на модель Daisyworld (с параметрами)
+#
+# В данной работе исследуется влияние изменения светимости
+# на динамику численности ромашек и температуру поверхности
+# при различных параметрах модели.
+#
+# Используется сценарий `:ramp`, при котором светимость
+# постепенно изменяется во времени.
+#
+# Анализ проводится для разных комбинаций параметров модели.
+
+using DrWatson
+@quickactivate "project"
+
+# ## Подключение библиотек
+
+using Agents
+using DataFrames
+using Plots
+using CairoMakie
+import StatsBase
+
+# ## Подключение модели
+
+include(srcdir("daisyworld.jl"))
+
+# ## Определение функций для подсчёта агентов
+
+black(a) = a.breed == :black
+white(a) = a.breed == :white
+adata = [(black, count), (white, count)]
+
+# ## Параметры эксперимента
+
+param_dict = Dict(
+    :griddims => (30, 30),
+    :max_age => [25, 40],
+    :init_white => [0.2, 0.8],
+    :init_black => 0.2,
+    :albedo_white => 0.75,
+    :albedo_black => 0.25,
+    :surface_albedo => 0.4,
+    :solar_change => 0.005,
+    :solar_luminosity => 1.0,
+    :scenario => :ramp,
+    :seed => 165,
+)
+
+# ## Формирование списка комбинаций параметров
+
+params_list = dict_list(param_dict)
+
+# ## Проведение серии экспериментов
+
+for params in params_list
+    model = daisyworld(; params...)
+
+    # ## Определение метрик модели
+
+    temperature(model) = StatsBase.mean(model.temperature)
+    mdata = [temperature, :solar_luminosity]
+
+    # ## Запуск моделирования
+
+    agent_df, model_df = run!(model, 1000; adata = adata, mdata = mdata)
+
+    # ## Построение графиков
+
+    figure = CairoMakie.Figure(size = (600, 600))
+
+    # --- Численность ромашек
+    ax1 = figure[1, 1] = Axis(figure, ylabel = "daisy count")
+
+    blackl = lines!(
+        ax1,
+        agent_df[!, :time],
+        agent_df[!, :count_black],
+        color = :red
+    )
+
+    whitel = lines!(
+        ax1,
+        agent_df[!, :time],
+        agent_df[!, :count_white],
+        color = :blue
+    )
+
+    figure[1, 2] = Legend(figure, [blackl, whitel], ["black", "white"])
+
+    # --- Температура
+    ax2 = figure[2, 1] = Axis(figure, ylabel = "temperature")
+
+    lines!(
+        ax2,
+        model_df[!, :time],
+        model_df[!, :temperature],
+        color = :red
+    )
+
+    # --- Светимость
+    ax3 = figure[3, 1] = Axis(
+        figure,
+        xlabel = "tick",
+        ylabel = "luminosity"
+    )
+
+    lines!(
+        ax3,
+        model_df[!, :time],
+        model_df[!, :solar_luminosity],
+        color = :red
+    )
+
+    # Скрываем подписи оси X для верхних графиков
+    for ax in (ax1, ax2)
+        ax.xticklabelsvisible = false
+    end
+
+    # ## Сохранение результатов
+
+    plt_name = savename("daisy-luminosity", params) * ".png"
+    save(plotsdir(plt_name), figure)
+end
+
+println("Готово: графики влияния светимости сохранены в папку plots")
+
+# ## Анализ результатов
+#
+# По полученным графикам можно сделать следующие выводы:
+#
+# 1. При изменении светимости (сценарий `:ramp`) наблюдается
+#    изменение температуры поверхности, которое следует за
+#    внешним воздействием.
+#
+# 2. Численность чёрных и белых ромашек изменяется в ответ
+#    на изменение температуры, обеспечивая частичную компенсацию
+#    внешнего воздействия.
+#
+# 3. В разные моменты времени доминируют разные типы ромашек:
+#    - при более низкой температуре преобладают чёрные ромашки;
+#    - при более высокой — белые.
+#
+# 4. Несмотря на изменение внешних условий, система демонстрирует
+#    устойчивость и способность к саморегуляции.
+#
+# Таким образом, модель Daisyworld показывает механизм
+# стабилизации климата за счёт взаимодействия агентов и среды.

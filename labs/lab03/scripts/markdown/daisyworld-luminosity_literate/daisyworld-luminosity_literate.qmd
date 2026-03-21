@@ -1,0 +1,169 @@
+# Модель Daisyworld при изменяющейся светимости
+
+В данной работе исследуется поведение модели Daisyworld
+при изменении светимости (luminosity) во времени.
+
+Рассматривается сценарий `:ramp`, при котором:
+- светимость сначала увеличивается,
+- затем уменьшается.
+
+Анализируются:
+- численность чёрных и белых ромашек,
+- температура среды,
+- изменение светимости.
+
+Результат сохраняется в виде графика.
+
+```{julia}
+using DrWatson
+@quickactivate "project"
+```
+
+## Подключение библиотек
+
+```{julia}
+using Agents
+using DataFrames
+using Plots
+using CairoMakie
+import StatsBase
+```
+
+## Подключение модели
+
+```{julia}
+include(srcdir("daisyworld.jl"))
+```
+
+## Определение типов агентов
+
+Функции для подсчёта ромашек по типу
+
+```{julia}
+black(a) = a.breed == :black
+white(a) = a.breed == :white
+```
+
+Какие данные по агентам собираем
+
+```{julia}
+adata = [(black, count), (white, count)]
+```
+
+## Создание модели
+
+Используем сценарий изменения светимости
+
+```{julia}
+model = daisyworld(solar_luminosity = 1.0, scenario = :ramp)
+```
+
+## Сбор данных модели
+
+Средняя температура
+
+```{julia}
+temperature(model) = StatsBase.mean(model.temperature)
+```
+
+Какие данные по модели собираем
+
+```{julia}
+mdata = [temperature, :solar_luminosity]
+```
+
+## Запуск моделирования
+
+```{julia}
+agent_df, model_df = run!(model, 1000; adata = adata, mdata = mdata)
+```
+
+## Построение графиков
+
+```{julia}
+figure = CairoMakie.Figure(size = (600, 600))
+```
+
+--- Число ромашек ---
+
+```{julia}
+ax1 = figure[1, 1] = Axis(figure, ylabel = "daisy count")
+
+blackl = lines!(
+    ax1,
+    agent_df[!, :time],
+    agent_df[!, :count_black],
+    color = :red
+)
+
+whitel = lines!(
+    ax1,
+    agent_df[!, :time],
+    agent_df[!, :count_white],
+    color = :blue
+)
+
+figure[1, 2] = Legend(figure, [blackl, whitel], ["black", "white"])
+```
+
+--- Температура ---
+
+```{julia}
+ax2 = figure[2, 1] = Axis(figure, ylabel = "temperature")
+
+lines!(
+    ax2,
+    model_df[!, :time],
+    model_df[!, :temperature],
+    color = :red
+)
+```
+
+--- Светимость ---
+
+```{julia}
+ax3 = figure[3, 1] = Axis(figure, xlabel = "tick", ylabel = "luminosity")
+
+lines!(
+    ax3,
+    model_df[!, :time],
+    model_df[!, :solar_luminosity],
+    color = :red
+)
+```
+
+Убираем подписи оси X у верхних графиков
+
+```{julia}
+for ax in (ax1, ax2)
+    ax.xticklabelsvisible = false
+end
+```
+
+## Сохранение результата
+
+```{julia}
+save(plotsdir("daisy_luminosity.png"), figure)
+
+println("Готово: создан файл plots/daisy_luminosity.png")
+```
+
+## Анализ результатов
+
+По полученному графику можно сделать следующие выводы:
+
+1. При увеличении светимости начинают доминировать белые ромашки,
+   поскольку они отражают больше солнечного излучения.
+
+2. Чёрные ромашки постепенно исчезают, так как становятся менее
+   выгодными в условиях высокой температуры.
+
+3. Температура среды стремится к стабилизации, несмотря на изменение
+   внешних условий.
+
+4. Система демонстрирует механизм саморегуляции за счёт взаимодействия
+   организмов и окружающей среды.
+
+Таким образом, модель Daisyworld подтверждает возможность поддержания
+устойчивого состояния системы при изменяющихся внешних параметрах.
+
