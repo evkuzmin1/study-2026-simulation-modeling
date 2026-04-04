@@ -1,0 +1,237 @@
+# Лабораторная работа 4
+## Параметрическое исследование модели SIR
+
+В данном файле рассматривается параметрическое исследование агентной
+модели SIR. В отличие от базового запуска, где моделирование выполняется
+для одного фиксированного набора параметров, здесь коэффициент передачи
+инфекции рассматривается как изменяемый параметр.
+
+Для каждого значения коэффициента заразности выполняется несколько
+прогонов модели с разными значениями генератора случайных чисел. Это
+позволяет учесть стохастический характер агентной модели и получить
+более устойчивые усреднённые результаты.
+
+```{julia}
+using DrWatson
+@quickactivate "project"
+
+using Agents, DataFrames, Plots, CSV, Random
+using Statistics
+
+include(srcdir("sir_model.jl"))
+```
+
+## Функция запуска одного эксперимента
+
+Для одного набора параметров вычисляются основные характеристики
+эпидемического процесса:
+
+- пиковая доля инфицированных;
+- конечная доля инфицированных;
+- конечная доля выздоровевших;
+- число умерших.
+
+```{julia}
+function run_experiment(p)
+```
+
+Создаём β_und и β_det на основе скалярного beta
+
+```{julia}
+beta = p[:beta]
+β_und = fill(beta, 3)
+β_det = fill(beta / 10, 3)
+```
+
+Инициализация модели
+
+```{julia}
+model = initialize_sir(;
+Ns = p[:Ns],
+β_und = β_und,
+β_det = β_det,
+infection_period = p[:infection_period],
+detection_time = p[:detection_time],
+death_rate = p[:death_rate],
+reinfection_probability = p[:reinfection_probability],
+Is = p[:Is],
+seed = p[:seed],
+n_steps = p[:n_steps],
+)
+```
+
+Функция для вычисления текущей доли инфицированных
+
+```{julia}
+infected_fraction(model) =
+count(a.status == :I for a in allagents(model)) / nagents(model)
+
+peak_infected = 0.0
+```
+
+Основной цикл моделирования
+
+```{julia}
+for step = 1:p[:n_steps]
+```
+
+Выполняем безопасный ручной шаг по всем агентам
+
+```{julia}
+agent_ids = collect(allids(model))
+for id in agent_ids
+agent = try
+model[id]
+catch
+nothing
+end
+
+if agent !== nothing
+sir_agent_step!(agent, model)
+end
+end
+
+frac = infected_fraction(model)
+if frac > peak_infected
+peak_infected = frac
+end
+end
+```
+
+Итоговые характеристики
+
+```{julia}
+final_infected = infected_fraction(model)
+final_recovered = count(a.status == :R for a in allagents(model)) / nagents(model)
+total_deaths = sum(p[:Ns]) - nagents(model)
+
+return (
+peak = peak_infected,
+final_inf = final_infected,
+final_rec = final_recovered,
+deaths = total_deaths,
+)
+end
+```
+
+## Диапазон параметров
+
+Рассматриваются значения коэффициента передачи инфекции от 0.1 до 1.0
+с шагом 0.1. Для каждого значения выполняются три прогона модели
+с различными значениями seed.
+
+```{julia}
+beta_range = 0.1:0.1:1.0
+seeds = [42, 43, 44]
+```
+
+## Формирование списка параметров
+
+Для каждого значения beta и каждого значения seed создаётся отдельный
+набор параметров.
+
+```{julia}
+params_list = []
+
+for b in beta_range
+for s in seeds
+push!(
+params_list,
+Dict(
+:beta => b,
+:Ns => [1000, 1000, 1000],
+:infection_period => 14,
+:detection_time => 7,
+:death_rate => 0.02,
+:reinfection_probability => 0.1,
+:Is => [0, 0, 1],
+:seed => s,
+:n_steps => 100,
+),
+)
+end
+end
+```
+
+## Запуск экспериментов
+
+Для каждого набора параметров выполняется моделирование, а затем
+результаты сохраняются в общий массив.
+
+```{julia}
+results = []
+
+for params in params_list
+data = run_experiment(params)
+push!(results, merge(params, Dict(pairs(data))))
+println("Завершён эксперимент с beta = $(params[:beta]), seed = $(params[:seed])")
+end
+```
+
+## Сохранение результатов
+
+Все результаты отдельных прогонов сохраняются в таблицу и записываются
+в CSV-файл.
+
+```{julia}
+df = DataFrame(results)
+CSV.write(datadir("beta_scan_all.csv"), df)
+```
+
+## Усреднение по повторам
+
+Для каждого значения beta вычисляются усреднённые значения основных
+характеристик эпидемии.
+
+```{julia}
+grouped = combine(
+groupby(df, [:beta]),
+:peak => mean => :mean_peak,
+:final_inf => mean => :mean_final_inf,
+:deaths => mean => :mean_deaths,
+)
+```
+
+## Построение графика
+
+Построим график зависимости усреднённых характеристик эпидемии
+от коэффициента заразности beta.
+
+```{julia}
+plot(
+grouped.beta,
+grouped.mean_peak,
+label = "Пик эпидемии",
+xlabel = "Коэффициент заразности β",
+ylabel = "Доля инфицированных",
+marker = :circle,
+linewidth = 2,
+)
+
+plot!(
+grouped.beta,
+grouped.mean_final_inf,
+label = "Конечная доля инфицированных",
+marker = :square,
+)
+
+plot!(
+grouped.beta,
+grouped.mean_deaths ./ 3000,
+label = "Доля умерших",
+marker = :diamond,
+)
+
+savefig(plotsdir("beta_scan.png"))
+
+println("Результаты сохранены в data/beta_scan_all.csv и plots/beta_scan.png")
+```
+
+## Вывод
+
+В результате параметрического исследования были получены усреднённые
+характеристики эпидемического процесса для различных значений
+коэффициента передачи инфекции. Это позволяет оценить влияние параметра
+beta на интенсивность распространения инфекции, конечную долю заболевших
+и смертность.
+
