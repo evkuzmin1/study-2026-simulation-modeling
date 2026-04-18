@@ -1,0 +1,13 @@
+N,tmax,model,deadlock,n_records
+3,30.0,classic,true,13
+3,30.0,arbiter,false,67
+3,50.0,classic,true,4
+3,50.0,arbiter,false,82
+5,30.0,classic,true,24
+5,30.0,arbiter,false,41
+5,50.0,classic,true,18
+5,50.0,arbiter,false,84
+7,30.0,classic,true,26
+7,30.0,arbiter,false,44
+7,50.0,classic,true,23
+7,50.0,arbiter,false,79
