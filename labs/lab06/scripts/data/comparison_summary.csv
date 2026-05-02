@@ -1,0 +1,3 @@
+scenario,β,γ,peak_I_det,peak_I_stoch,final_R_det,final_R_stoch
+fast_recovery,0.3,0.2,907.6221152021564,995.0,999.999997915636,1000.0
+low_infection,0.15,0.1,954.1568964325846,995.0,999.9544516223223,1000.0

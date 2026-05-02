@@ -1,0 +1,4 @@
+scenario,β,γ,tmax,peak_I,final_S,final_I,final_R,gif_file
+baseline,0.3,0.1,60.0,981.7051443048791,7.462910338349294e-10,2.4825621576059786,997.5174378416497,/home/evkuzmin/work/study/2026-1/simulation-modeling/labs/lab06/scripts/plots/sir_animation_baseline.gif
+fast_recovery,0.3,0.3,60.0,946.1173303177369,1.5330738700861136e-12,1.5343709768681995e-5,999.9999846562898,/home/evkuzmin/work/study/2026-1/simulation-modeling/labs/lab06/scripts/plots/sir_animation_fast_recovery.gif
+lower_infection,0.1,0.1,60.0,984.728878553555,1.8090865830742928e-11,2.490229286039576,997.509770713943,/home/evkuzmin/work/study/2026-1/simulation-modeling/labs/lab06/scripts/plots/sir_animation_lower_infection.gif

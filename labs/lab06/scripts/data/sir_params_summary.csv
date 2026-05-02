@@ -1,0 +1,7 @@
+scenario,β,γ,tmax,model,final_S,final_I,final_R,n_records
+baseline,0.3,0.1,100.0,deterministic,1.9705896752637743e-12,0.04547647665440192,999.9545235233455,201
+baseline,0.3,0.1,100.0,stochastic,0.0,0.0,1000.0,1991
+fast_recovery,0.3,0.3,100.0,deterministic,1.533050350782367e-12,2.3064880410867833e-9,999.9999999976931,201
+fast_recovery,0.3,0.3,100.0,stochastic,0.0,0.0,1000.0,1991
+lower_infection,0.1,0.1,100.0,deterministic,1.6046031595480511e-12,0.04562103235980151,999.9543789676393,201
+lower_infection,0.1,0.1,100.0,stochastic,0.0,0.0,1000.0,1991
