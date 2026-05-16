@@ -1,0 +1,9 @@
+model,resource_count,efficiency_index
+M/M/c,2,1.0
+M/M/c,3,0.2707650133471996
+M/M/c,4,0.16388095238246386
+M/M/c,5,0.06672833813682728
+Ross model,1,1.0
+Ross model,2,0.31774227878573896
+Ross model,3,0.16628310214419076
+Ross model,4,0.16168909180744104

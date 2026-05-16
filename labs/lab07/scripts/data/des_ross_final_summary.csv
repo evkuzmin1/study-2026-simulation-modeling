@@ -1,0 +1,2 @@
+model,num_operating,num_spares,num_repairers,failure_rate,repair_rate,time_to_failure_single_run,mean_time_to_failure_simulation,mean_time_to_failure_analytical,avg_repair_queue,repairer_utilization
+Ross model,5,3,1,0.1,0.5,68.61697048397791,18.392977359920536,19.999999999999993,0.6764863135848384,0.8181522546775973

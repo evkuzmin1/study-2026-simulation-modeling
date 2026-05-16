@@ -1,0 +1,2 @@
+num_customers,num_servers,lambda,mu,rho,simulation_time,avg_waiting_time,avg_service_time,avg_system_time,max_waiting_time,max_queue_length,max_busy_servers,utilization
+200,2,0.9,0.5,0.9,254.3915929510254,3.6316049368326118,1.9206432256295176,5.55224816246213,12.055295966488046,12,2,0.7549947713874622

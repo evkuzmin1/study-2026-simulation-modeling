@@ -1,0 +1,2 @@
+num_operating,num_spares,num_repairers,failure_rate,repair_rate,seed,time_to_failure,failed,avg_repair_queue,max_repair_queue,avg_busy_repairers,max_busy_repairers,repairer_utilization,avg_spares_available,analytic_mttf
+5,3,1,0.1,0.5,123,68.61697048397791,true,0.6764863135848384,2,0.8181522546775973,1,0.8181522546775973,1.5053614317375643,19.999999999999993

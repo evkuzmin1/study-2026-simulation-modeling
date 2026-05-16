@@ -1,0 +1,2 @@
+n_replications,mean_time_to_failure,std_time_to_failure,min_time_to_failure,max_time_to_failure,mean_repair_queue,mean_repairer_utilization,analytic_mttf
+100,18.392977359920536,12.28060918971274,2.751787046446887,68.61697048397791,0.4741943140491406,0.6447523917878643,19.999999999999993

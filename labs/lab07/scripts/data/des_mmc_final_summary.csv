@@ -1,0 +1,2 @@
+model,num_customers,num_servers,lambda,mu,rho_simulation,rho_analytical,avg_waiting_time_simulation,avg_waiting_time_analytical,avg_system_time_simulation,avg_system_time_analytical,max_queue_length
+M/M/c,200,2,0.9,0.5,0.7549947713874622,0.9,3.6316049368326118,8.526315789473687,5.55224816246213,10.526315789473687,12

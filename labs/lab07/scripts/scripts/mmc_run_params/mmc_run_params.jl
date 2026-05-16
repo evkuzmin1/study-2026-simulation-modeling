@@ -1,0 +1,153 @@
+using DrWatson
+@quickactivate "project"
+
+include(srcdir("MMCModel.jl"))
+using .MMCModel
+
+using DataFrames
+using CSV
+using Plots
+using Statistics
+
+num_customers = 200
+lambda = 0.9
+mu = 0.5
+
+server_counts = [2, 3, 4, 5]
+n_replications = 5
+base_seed = 100
+
+results = []
+
+for c in server_counts
+    for rep in 1:n_replications
+        params = MMCParameters(
+            num_customers = num_customers,
+            num_servers = c,
+            lambda = lambda,
+            mu = mu,
+            seed = base_seed + 100 * c + rep,
+        )
+
+        result = run_mmc_simulation(params)
+        metrics = result.metrics
+
+        push!(
+            results,
+            (
+                num_servers = c,
+                replication = rep,
+                lambda = lambda,
+                mu = mu,
+                rho = metrics.rho[1],
+                avg_waiting_time = metrics.avg_waiting_time[1],
+                avg_system_time = metrics.avg_system_time[1],
+                max_queue_length = metrics.max_queue_length[1],
+                utilization = metrics.utilization[1],
+            ),
+        )
+    end
+end
+
+df_results = DataFrame(results)
+
+df_summary = combine(
+    groupby(df_results, :num_servers),
+    :lambda => first => :lambda,
+    :mu => first => :mu,
+    :rho => mean => :rho_mean,
+    :avg_waiting_time => mean => :avg_waiting_time_mean,
+    :avg_waiting_time => std => :avg_waiting_time_std,
+    :avg_system_time => mean => :avg_system_time_mean,
+    :avg_system_time => std => :avg_system_time_std,
+    :max_queue_length => mean => :max_queue_length_mean,
+    :utilization => mean => :utilization_mean,
+)
+
+analytics_rows = []
+
+for c in server_counts
+    params = MMCParameters(
+        num_customers = num_customers,
+        num_servers = c,
+        lambda = lambda,
+        mu = mu,
+        seed = base_seed,
+    )
+
+    analytics = mmc_analytics(params)
+
+    push!(
+        analytics_rows,
+        (
+            num_servers = c,
+            rho_analytical = analytics.rho[1],
+            Wq_analytical = analytics.Wq[1],
+            W_analytical = analytics.W[1],
+            stable = analytics.stable[1],
+        ),
+    )
+end
+
+df_analytics = DataFrame(analytics_rows)
+
+df_compare = leftjoin(df_summary, df_analytics, on = :num_servers)
+
+CSV.write(datadir("mmc_params_results.csv"), df_results)
+CSV.write(datadir("mmc_params_summary.csv"), df_summary)
+CSV.write(datadir("mmc_params_analytics.csv"), df_analytics)
+CSV.write(datadir("mmc_params_compare.csv"), df_compare)
+
+println("M/M/c parameter experiment summary:")
+println(df_compare)
+
+p_time = plot(
+    df_compare.num_servers,
+    [df_compare.avg_waiting_time_mean df_compare.avg_system_time_mean],
+    marker = :circle,
+    xlabel = "Number of servers",
+    ylabel = "Time",
+    title = "M/M/c: average waiting and system time",
+    label = ["Average waiting time" "Average system time"],
+    linewidth = 2,
+)
+
+savefig(p_time, plotsdir("mmc_params_time.png"))
+
+p_queue = plot(
+    df_compare.num_servers,
+    df_compare.max_queue_length_mean,
+    marker = :circle,
+    xlabel = "Number of servers",
+    ylabel = "Average max queue length",
+    title = "M/M/c: max queue length",
+    label = "Max queue length",
+    linewidth = 2,
+)
+
+savefig(p_queue, plotsdir("mmc_params_queue.png"))
+
+p_util = plot(
+    df_compare.num_servers,
+    [df_compare.utilization_mean df_compare.rho_analytical],
+    marker = :circle,
+    xlabel = "Number of servers",
+    ylabel = "Utilization",
+    title = "M/M/c: server utilization",
+    label = ["Simulation utilization" "Analytical rho"],
+    linewidth = 2,
+)
+
+savefig(p_util, plotsdir("mmc_params_utilization.png"))
+
+println()
+println("Parameterized M/M/c experiment completed.")
+println("Saved data:")
+println("  data/mmc_params_results.csv")
+println("  data/mmc_params_summary.csv")
+println("  data/mmc_params_analytics.csv")
+println("  data/mmc_params_compare.csv")
+println("Saved plots:")
+println("  plots/mmc_params_time.png")
+println("  plots/mmc_params_queue.png")
+println("  plots/mmc_params_utilization.png")

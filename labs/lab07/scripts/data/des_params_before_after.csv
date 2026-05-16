@@ -1,0 +1,7 @@
+model,metric,initial_resource,final_resource,initial_value,final_value,relative_change
+M/M/c,Average waiting time,2,5,4.089328547654651,0.019977382891076985,-0.995114752297774
+M/M/c,Average max queue length,2,5,14.0,1.8,-0.8714285714285713
+M/M/c,Server utilization,2,5,0.8691339742035311,0.3675587441436069,-0.5770977144456522
+Ross model,Mean time to failure,1,4,17.89117922514051,55.32586962158058,2.092354557816804
+Ross model,Mean repair queue,1,4,0.42389354065984763,0.0,-1.0
+Ross model,Repairer utilization,1,4,0.5809200108453387,0.22207786317458356,-0.6177135250489616

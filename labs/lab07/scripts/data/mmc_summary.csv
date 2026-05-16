@@ -1,0 +1,4 @@
+metric,simulation,analytical
+average waiting time,3.6316049368326118,8.526315789473687
+average system time,5.55224816246213,10.526315789473687
+utilization,0.7549947713874622,0.9

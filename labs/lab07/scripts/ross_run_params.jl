@@ -1,0 +1,305 @@
+using DrWatson
+@quickactivate "project"
+
+include(srcdir("RossModel.jl"))
+using .RossModel
+
+using DataFrames
+using CSV
+using Plots
+using Statistics
+using StatsPlots
+
+# =============================================================================
+# Лабораторная работа №7
+# Дискретно-событийное моделирование
+# Параметризованная версия модели Росса
+# =============================================================================
+#
+# В данном скрипте выполняется параметризованный эксперимент для модели Росса.
+#
+# Модель Росса описывает систему с работающими машинами, резервными машинами
+# и ремонтниками.
+#
+# Логика модели:
+# - в системе должно постоянно работать заданное число машин;
+# - если работающая машина ломается, она заменяется резервной;
+# - сломанная машина отправляется в ремонт;
+# - если свободного ремонтника нет, машина становится в очередь;
+# - если резервных машин не осталось, система считается отказавшей.
+#
+# В этой параметризованной версии исследуется влияние числа ремонтников
+# на характеристики системы.
+#
+# Изменяемый параметр:
+# - num_repairers = 1, 2, 3, 4
+#
+# Фиксированные параметры:
+# - число работающих машин;
+# - число резервных машин;
+# - интенсивность отказов;
+# - интенсивность ремонта;
+# - максимальное время моделирования.
+#
+# Для каждого значения числа ремонтников выполняется серия независимых
+# повторов. Это нужно, потому что модель стохастическая, и один запуск
+# может дать случайно завышенное или заниженное время до отказа.
+
+# =============================================================================
+# Общие параметры эксперимента
+# =============================================================================
+
+num_operating = 5
+num_spares = 3
+
+failure_rate = 0.1
+repair_rate = 0.5
+
+repairer_counts = [1, 2, 3, 4]
+
+n_replications = 100
+base_seed = 500
+max_time = 1000.0
+
+# =============================================================================
+# Таблицы для сохранения результатов
+# =============================================================================
+#
+# all_replications — подробная таблица всех повторов.
+# summary_rows — сводная таблица по каждому количеству ремонтников.
+# analytics_rows — аналитические значения MTTF для каждого сценария.
+# sample_history_rows — история одного демонстрационного запуска для каждого
+# значения числа ремонтников.
+
+all_replications = []
+summary_rows = []
+analytics_rows = []
+sample_history_rows = []
+
+# =============================================================================
+# Запуск параметризованного эксперимента
+# =============================================================================
+
+for repairers in repairer_counts
+    params = RossParameters(
+        num_operating = num_operating,
+        num_spares = num_spares,
+        num_repairers = repairers,
+        failure_rate = failure_rate,
+        repair_rate = repair_rate,
+        seed = base_seed + 100 * repairers,
+        max_time = max_time,
+    )
+
+    # Один демонстрационный запуск нужен для сохранения истории состояний.
+    sample_result = run_ross_simulation(params)
+
+    for row in eachrow(sample_result.history)
+        push!(
+            sample_history_rows,
+            (
+                num_repairers = repairers,
+                time = row.time,
+                event = row.event,
+                operating_machines = row.operating_machines,
+                spares_available = row.spares_available,
+                repair_queue = row.repair_queue,
+                repairers_busy = row.repairers_busy,
+                broken_total = row.broken_total,
+                failed = row.failed,
+            ),
+        )
+    end
+
+    # Серия независимых повторов для устойчивой оценки времени до отказа.
+    replications = run_ross_replications(
+        params;
+        n_replications = n_replications,
+    )
+
+    for row in eachrow(replications.replications)
+        push!(
+            all_replications,
+            (
+                num_repairers = repairers,
+                replication = row.replication,
+                seed = row.seed,
+                time_to_failure = row.time_to_failure,
+                failed = row.failed,
+                avg_repair_queue = row.avg_repair_queue,
+                repairer_utilization = row.repairer_utilization,
+            ),
+        )
+    end
+
+    summary = replications.summary
+    analytic_mttf = ross_analytic_mttf(params)
+
+    push!(
+        summary_rows,
+        (
+            num_repairers = repairers,
+            num_operating = num_operating,
+            num_spares = num_spares,
+            failure_rate = failure_rate,
+            repair_rate = repair_rate,
+            n_replications = n_replications,
+            mean_time_to_failure = summary.mean_time_to_failure[1],
+            std_time_to_failure = summary.std_time_to_failure[1],
+            min_time_to_failure = summary.min_time_to_failure[1],
+            max_time_to_failure = summary.max_time_to_failure[1],
+            mean_repair_queue = summary.mean_repair_queue[1],
+            mean_repairer_utilization = summary.mean_repairer_utilization[1],
+            analytic_mttf = analytic_mttf,
+        ),
+    )
+
+    push!(
+        analytics_rows,
+        (
+            num_repairers = repairers,
+            analytic_mttf = analytic_mttf,
+        ),
+    )
+end
+
+# =============================================================================
+# Формирование итоговых таблиц
+# =============================================================================
+
+df_replications = DataFrame(all_replications)
+df_summary = DataFrame(summary_rows)
+df_analytics = DataFrame(analytics_rows)
+df_sample_history = DataFrame(sample_history_rows)
+
+# Дополнительная таблица сравнения имитационного и аналитического MTTF.
+df_compare = DataFrame(
+    num_repairers = df_summary.num_repairers,
+    simulation_mttf = df_summary.mean_time_to_failure,
+    analytical_mttf = df_summary.analytic_mttf,
+    absolute_difference = abs.(
+        df_summary.mean_time_to_failure .- df_summary.analytic_mttf,
+    ),
+)
+
+# Сохраняем подробные результаты в data/.
+CSV.write(datadir("ross_params_replications.csv"), df_replications)
+CSV.write(datadir("ross_params_summary.csv"), df_summary)
+CSV.write(datadir("ross_params_analytics.csv"), df_analytics)
+CSV.write(datadir("ross_params_sample_history.csv"), df_sample_history)
+CSV.write(datadir("ross_params_mttf_compare.csv"), df_compare)
+
+println("Ross model parameter experiment summary:")
+println(df_summary)
+
+println()
+println("Simulation and analytical MTTF comparison:")
+println(df_compare)
+
+# =============================================================================
+# График 1. Среднее время до отказа
+# =============================================================================
+#
+# Первый график показывает, как число ремонтников влияет на среднее время
+# до отказа системы.
+#
+# Чем больше ремонтников, тем быстрее сломанные машины возвращаются в резерв.
+# Поэтому система должна в среднем работать дольше.
+
+p_mttf = plot(
+    df_summary.num_repairers,
+    [df_summary.mean_time_to_failure df_summary.analytic_mttf],
+    marker = :circle,
+    xlabel = "Number of repairers",
+    ylabel = "Mean time to failure",
+    title = "Ross model: mean time to failure",
+    label = ["Simulation mean" "Analytical MTTF"],
+    linewidth = 2,
+)
+
+savefig(p_mttf, plotsdir("ross_params_mttf.png"))
+
+# =============================================================================
+# График 2. Средняя очередь на ремонт
+# =============================================================================
+#
+# Второй график показывает среднюю длину очереди на ремонт.
+#
+# При одном ремонтнике очередь может накапливаться, потому что ремонтный
+# ресурс ограничен. При увеличении числа ремонтников очередь должна снижаться.
+
+p_queue = plot(
+    df_summary.num_repairers,
+    df_summary.mean_repair_queue,
+    marker = :circle,
+    xlabel = "Number of repairers",
+    ylabel = "Mean repair queue",
+    title = "Ross model: mean repair queue",
+    label = "Repair queue",
+    linewidth = 2,
+)
+
+savefig(p_queue, plotsdir("ross_params_queue.png"))
+
+# =============================================================================
+# График 3. Средняя загрузка ремонтников
+# =============================================================================
+#
+# Третий график показывает среднюю загрузку ремонтников.
+#
+# При увеличении числа ремонтников общая ремонтная нагрузка распределяется
+# между большим количеством ресурсов. Поэтому средняя загрузка одного
+# ремонтного ресурса обычно уменьшается.
+
+p_util = plot(
+    df_summary.num_repairers,
+    df_summary.mean_repairer_utilization,
+    marker = :circle,
+    xlabel = "Number of repairers",
+    ylabel = "Repairer utilization",
+    title = "Ross model: repairer utilization",
+    label = "Utilization",
+    linewidth = 2,
+)
+
+savefig(p_util, plotsdir("ross_params_utilization.png"))
+
+# =============================================================================
+# График 4. Разброс времени до отказа по повторам
+# =============================================================================
+#
+# Четвёртый график показывает значения времени до отказа по всем независимым
+# повторам для каждого количества ремонтников.
+#
+# Такой график нужен, чтобы увидеть не только среднее значение, но и разброс
+# результатов. Для стохастической модели это важно, потому что отдельные
+# запуски могут существенно отличаться.
+
+p_box = boxplot(
+    string.(df_replications.num_repairers),
+    df_replications.time_to_failure,
+    xlabel = "Number of repairers",
+    ylabel = "Time to failure",
+    title = "Ross model: time to failure distribution",
+    label = "Replications",
+)
+
+savefig(p_box, plotsdir("ross_params_ttf_distribution.png"))
+
+# =============================================================================
+# Итог
+# =============================================================================
+
+println()
+println("Parameterized Ross model experiment completed.")
+println("Saved data:")
+println("  data/ross_params_replications.csv")
+println("  data/ross_params_summary.csv")
+println("  data/ross_params_analytics.csv")
+println("  data/ross_params_sample_history.csv")
+println("  data/ross_params_mttf_compare.csv")
+println("Saved plots:")
+println("  plots/ross_params_mttf.png")
+println("  plots/ross_params_queue.png")
+println("  plots/ross_params_utilization.png")
+println("  plots/ross_params_ttf_distribution.png")
