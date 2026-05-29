@@ -1,0 +1,216 @@
+# Лабораторная работа №8
+
+## Базовая дискретно-событийная SIR-модель
+
+В данном скрипте выполняется базовый запуск SIR-модели в
+дискретно-событийном подходе.
+
+Модель SIR разделяет популяцию на три группы:
+
+- `S` — восприимчивые агенты;
+- `I` — инфицированные агенты;
+- `R` — выздоровевшие или удалённые из процесса распространения инфекции.
+
+В отличие от непрерывной модели на дифференциальных уравнениях,
+в дискретно-событийной модели состояние системы меняется только
+в моменты отдельных событий. В данной реализации такими событиями
+являются заражение и выздоровление.
+
+```{julia}
+using DrWatson
+@quickactivate "project"
+
+include(srcdir("sir_model.jl"))
+using .SIRModel
+
+using CSV
+using DataFrames
+using Plots
+using Literate
+```
+
+## Задание параметров модели
+
+Зададим параметры базового эксперимента.
+
+В начальный момент времени в популяции находится 990 восприимчивых
+агентов, 10 инфицированных и 0 выздоровевших. Параметр `beta`
+задаёт вероятность передачи инфекции при контакте, `c` задаёт
+среднее число контактов, а `gamma` — интенсивность выздоровления.
+
+```{julia}
+params = SIRParameters(
+    990,     # начальное число восприимчивых
+    10,      # начальное число инфицированных
+    0,       # начальное число выздоровевших
+    0.05,    # вероятность передачи инфекции
+    10.0,    # среднее число контактов
+    0.25,    # интенсивность выздоровления
+    100.0,   # максимальное время моделирования
+    123,     # seed
+)
+```
+
+Для выбранных параметров можно вычислить базовое репродуктивное число.
+Оно показывает, сколько человек в среднем может заразить один
+инфицированный агент в полностью восприимчивой популяции.
+
+```{julia}
+R0_value = sir_basic_reproduction_number(params)
+
+println("Basic reproduction number R0 = ", R0_value)
+```
+
+## Запуск дискретно-событийной симуляции
+
+После задания параметров запускаем модель. Внутри функции
+`simulate_sir_des` выполняется дискретно-событийная симуляция:
+
+- рассчитываются интенсивности заражения и выздоровления;
+- случайно определяется время до следующего события;
+- выбирается тип события;
+- состояние популяции обновляется;
+- результат сохраняется во временные ряды и таблицу событий.
+
+```{julia}
+result = simulate_sir_des(params)
+```
+
+## Формирование таблиц
+
+После выполнения симуляции сформируем три основные таблицы:
+
+- временной ряд значений `S`, `I`, `R`;
+- таблицу событий;
+- итоговую сводную таблицу по запуску.
+
+```{julia}
+df_result = result_dataframe(result)
+df_events = events_dataframe(result)
+df_summary = summary_dataframe(result)
+```
+
+Сохраним полученные данные в каталог `data/`.
+
+```{julia}
+CSV.write(datadir("sir_des_literate.csv"), df_result)
+CSV.write(datadir("sir_des_literate_events.csv"), df_events)
+CSV.write(datadir("sir_des_literate_summary.csv"), df_summary)
+
+println("SIR DES literate summary:")
+println(df_summary)
+```
+
+## Визуализация динамики SIR
+
+Первый график показывает общую динамику трёх групп: `S`, `I` и `R`.
+По нему можно увидеть, как число восприимчивых уменьшается, число
+инфицированных сначала растёт, а затем снижается, а число выздоровевших
+постепенно увеличивается.
+
+```{julia}
+p_dynamics = plot(
+    df_result.t,
+    [df_result.S df_result.I df_result.R],
+    label = ["S" "I" "R"],
+    xlabel = "Time",
+    ylabel = "Population",
+    title = "SIR DES dynamics",
+    linewidth = 2,
+)
+
+savefig(p_dynamics, plotsdir("sir_des_literate_dynamics.png"))
+```
+
+## Динамика инфицированных
+
+Второй график отдельно показывает число инфицированных агентов.
+Он удобен для анализа пика эпидемии и времени, в которое этот пик
+достигается.
+
+```{julia}
+p_infected = plot(
+    df_result.t,
+    df_result.I,
+    label = "Infected",
+    xlabel = "Time",
+    ylabel = "Infected",
+    title = "SIR DES infected dynamics",
+    linewidth = 2,
+)
+
+savefig(p_infected, plotsdir("sir_des_literate_infected.png"))
+```
+
+## Финальное состояние системы
+
+Дополнительно построим столбчатую диаграмму финального состояния.
+Она показывает, сколько агентов осталось в группах `S`, `I` и `R`
+к концу моделирования.
+
+```{julia}
+final_state = DataFrame(
+    group = ["S", "I", "R"],
+    value = [
+        df_result.S[end],
+        df_result.I[end],
+        df_result.R[end],
+    ],
+)
+
+CSV.write(datadir("sir_des_literate_final_state.csv"), final_state)
+
+p_final = bar(
+    final_state.group,
+    final_state.value,
+    label = "Final state",
+    xlabel = "Group",
+    ylabel = "Population",
+    title = "SIR DES final state",
+)
+
+savefig(p_final, plotsdir("sir_des_literate_final_state.png"))
+```
+
+## Итог базового запуска
+
+В результате выполнения literate-версии были получены таблицы и графики,
+аналогичные обычному базовому запуску. Отличие этой версии заключается
+в том, что код оформлен в литературном стиле и может быть преобразован
+в чистый Julia-скрипт, Jupyter Notebook и Quarto-документ.
+
+```{julia}
+println()
+println("SIR DES literate simulation completed.")
+println("Saved data:")
+println("  data/sir_des_literate.csv")
+println("  data/sir_des_literate_events.csv")
+println("  data/sir_des_literate_summary.csv")
+println("  data/sir_des_literate_final_state.csv")
+println("Saved plots:")
+println("  plots/sir_des_literate_dynamics.png")
+println("  plots/sir_des_literate_infected.png")
+println("  plots/sir_des_literate_final_state.png")
+```
+
+## Генерация файлов из literate-версии
+
+В конце скрипта выполняется генерация производных файлов:
+
+- чистого Julia-скрипта;
+- Jupyter Notebook;
+- Quarto-документа.
+
+```{julia}
+output_dir = scriptsdir("generated", "sir_des_literate")
+mkpath(output_dir)
+
+Literate.script(@__FILE__, output_dir)
+Literate.notebook(@__FILE__, output_dir)
+Literate.markdown(@__FILE__, output_dir; flavor = Literate.QuartoFlavor())
+
+println()
+println("Generated literate outputs:")
+println("  scripts/generated/sir_des_literate/")
+```
+

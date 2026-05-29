@@ -1,0 +1,721 @@
+# # Лабораторная работа №8
+#
+# ## Параметризованная аналитическая версия DES SIR-модели
+#
+# В данном скрипте выполняется расширенный параметризованный анализ.
+#
+# Скрипт закрывает дополнительные сценарии:
+#
+# - вакцинация;
+# - фиксированная длительность болезни;
+# - оценка производительности;
+# - демографический сценарий;
+# - SEIR-расширение.
+#
+# Анализ чувствительности по `beta`, `c`, `gamma` уже был выполнен
+# в файле `sir_des_params.jl`.
+
+using DrWatson
+@quickactivate "project"
+
+include(srcdir("sir_model.jl"))
+using .SIRModel
+
+using CSV
+using DataFrames
+using Plots
+using Random
+using Distributions
+
+# ## Базовые параметры
+#
+# Зададим базовые параметры модели. Они используются как основа для
+# всех дополнительных сценариев.
+
+base_params = SIRParameters(
+    990,     # S0
+    10,      # I0
+    0,       # R0
+    0.05,    # beta
+    10.0,    # c
+    0.25,    # gamma
+    100.0,   # tmax
+    123,     # seed
+)
+
+# ## Вспомогательная функция для краткой сводки
+#
+# Эта функция используется для сценариев, где результат представлен
+# таблицей с колонками `t`, `S`, `I`, `R`.
+
+function simple_summary(df::DataFrame, model_name::String)
+    peak_I, peak_index = findmax(df.I)
+    peak_time = df.t[peak_index]
+
+    return DataFrame(
+        model = [model_name],
+        peak_I = [Float64(peak_I)],
+        peak_time = [Float64(peak_time)],
+        final_S = [Float64(df.S[end])],
+        final_I = [Float64(df.I[end])],
+        final_R = [Float64(df.R[end])],
+        final_size = [Float64(df.R[end])],
+    )
+end
+
+# ## Модель с фиксированной длительностью болезни
+#
+# В этом варианте время выздоровления не случайное, а фиксированное.
+# Каждый инфицированный остаётся в состоянии `I` ровно `illness_duration`
+# единиц времени.
+
+function simulate_fixed_recovery(
+    params::SIRParameters;
+    illness_duration::Float64 = 1.0 / params.gamma,
+)
+    rng = MersenneTwister(params.seed)
+
+    S = params.S0
+    I = params.I0
+    R = params.R0
+
+    N = S + I + R
+    t = 0.0
+
+    time = Float64[t]
+    S_values = Int[S]
+    I_values = Int[I]
+    R_values = Int[R]
+
+    recovery_times = fill(illness_duration, I)
+
+    while t < params.tmax
+        if I == 0 && isempty(recovery_times)
+            break
+        end
+
+        infection_rate = params.beta * params.c * S * I / N
+
+        if infection_rate > 0.0 && S > 0
+            next_infection_t = t + rand(rng, Exponential(1.0 / infection_rate))
+        else
+            next_infection_t = Inf
+        end
+
+        if !isempty(recovery_times)
+            next_recovery_t, recovery_index = findmin(recovery_times)
+        else
+            next_recovery_t = Inf
+            recovery_index = 0
+        end
+
+        next_t = min(next_infection_t, next_recovery_t)
+
+        if next_t == Inf || next_t > params.tmax
+            break
+        end
+
+        t = next_t
+
+        if next_recovery_t <= next_infection_t
+            I -= 1
+            R += 1
+            deleteat!(recovery_times, recovery_index)
+        else
+            S -= 1
+            I += 1
+            push!(recovery_times, t + illness_duration)
+        end
+
+        push!(time, t)
+        push!(S_values, S)
+        push!(I_values, I)
+        push!(R_values, R)
+    end
+
+    if time[end] < params.tmax
+        push!(time, params.tmax)
+        push!(S_values, S)
+        push!(I_values, I)
+        push!(R_values, R)
+    end
+
+    return DataFrame(
+        t = time,
+        S = S_values,
+        I = I_values,
+        R = R_values,
+    )
+end
+
+# ## Демографический сценарий
+#
+# В этом варианте в модель добавлены простые демографические события:
+# рождение и смерть.
+#
+# Рождение увеличивает число восприимчивых `S`, а смерть может уменьшать
+# одну из групп `S`, `I` или `R`.
+
+function simulate_sir_demography(
+    params::SIRParameters;
+    mu::Float64 = 0.005,
+)
+    rng = MersenneTwister(params.seed)
+
+    S = params.S0
+    I = params.I0
+    R = params.R0
+
+    t = 0.0
+
+    time = Float64[t]
+    S_values = Int[S]
+    I_values = Int[I]
+    R_values = Int[R]
+
+    while t < params.tmax
+        N = S + I + R
+
+        if N <= 0
+            break
+        end
+
+        infection_rate = params.beta * params.c * S * I / N
+        recovery_rate = params.gamma * I
+        birth_rate = mu * N
+        death_S_rate = mu * S
+        death_I_rate = mu * I
+        death_R_rate = mu * R
+
+        total_rate =
+            infection_rate +
+            recovery_rate +
+            birth_rate +
+            death_S_rate +
+            death_I_rate +
+            death_R_rate
+
+        if total_rate <= 0.0
+            break
+        end
+
+        dt = rand(rng, Exponential(1.0 / total_rate))
+        next_t = t + dt
+
+        if next_t > params.tmax
+            break
+        end
+
+        t = next_t
+
+        r = rand(rng) * total_rate
+
+        if r <= infection_rate && S > 0
+            S -= 1
+            I += 1
+        elseif r <= infection_rate + recovery_rate && I > 0
+            I -= 1
+            R += 1
+        elseif r <= infection_rate + recovery_rate + birth_rate
+            S += 1
+        elseif r <= infection_rate + recovery_rate + birth_rate + death_S_rate && S > 0
+            S -= 1
+        elseif r <= infection_rate + recovery_rate + birth_rate + death_S_rate + death_I_rate && I > 0
+            I -= 1
+        elseif R > 0
+            R -= 1
+        end
+
+        push!(time, t)
+        push!(S_values, S)
+        push!(I_values, I)
+        push!(R_values, R)
+    end
+
+    if time[end] < params.tmax
+        push!(time, params.tmax)
+        push!(S_values, S)
+        push!(I_values, I)
+        push!(R_values, R)
+    end
+
+    return DataFrame(
+        t = time,
+        S = S_values,
+        I = I_values,
+        R = R_values,
+    )
+end
+
+# ## SEIR-расширение
+#
+# В SEIR-модели добавляется состояние `E` — заражённые, но ещё не
+# инфекционные агенты.
+#
+# Переходы:
+#
+# - `S -> E`;
+# - `E -> I`;
+# - `I -> R`.
+
+function simulate_seir_des(
+    params::SIRParameters;
+    sigma::Float64 = 0.4,
+)
+    rng = MersenneTwister(params.seed)
+
+    S = params.S0
+    E = 0
+    I = params.I0
+    R = params.R0
+
+    N = S + E + I + R
+    t = 0.0
+
+    time = Float64[t]
+    S_values = Int[S]
+    E_values = Int[E]
+    I_values = Int[I]
+    R_values = Int[R]
+
+    while t < params.tmax
+        if E == 0 && I == 0
+            break
+        end
+
+        infection_rate = params.beta * params.c * S * I / N
+        incubation_rate = sigma * E
+        recovery_rate = params.gamma * I
+
+        total_rate = infection_rate + incubation_rate + recovery_rate
+
+        if total_rate <= 0.0
+            break
+        end
+
+        dt = rand(rng, Exponential(1.0 / total_rate))
+        next_t = t + dt
+
+        if next_t > params.tmax
+            break
+        end
+
+        t = next_t
+
+        r = rand(rng) * total_rate
+
+        if r <= infection_rate && S > 0
+            S -= 1
+            E += 1
+        elseif r <= infection_rate + incubation_rate && E > 0
+            E -= 1
+            I += 1
+        elseif I > 0
+            I -= 1
+            R += 1
+        end
+
+        push!(time, t)
+        push!(S_values, S)
+        push!(E_values, E)
+        push!(I_values, I)
+        push!(R_values, R)
+    end
+
+    if time[end] < params.tmax
+        push!(time, params.tmax)
+        push!(S_values, S)
+        push!(E_values, E)
+        push!(I_values, I)
+        push!(R_values, R)
+    end
+
+    return DataFrame(
+        t = time,
+        S = S_values,
+        E = E_values,
+        I = I_values,
+        R = R_values,
+    )
+end
+
+# ## Анализ сценариев вакцинации
+#
+# В этом блоке изменяется доля вакцинированных агентов.
+# Чем больше эта доля, тем меньше восприимчивых остаётся в системе.
+
+vaccination_fractions = [0.0, 0.1, 0.25, 0.4, 0.6]
+
+vaccination_summary = DataFrame(
+    vaccination_fraction = Float64[],
+    peak_I = Float64[],
+    peak_time = Float64[],
+    final_S = Float64[],
+    final_I = Float64[],
+    final_R = Float64[],
+    final_size = Float64[],
+)
+
+for fraction in vaccination_fractions
+    result = simulate_sir_des_vaccination(
+        base_params;
+        vaccination_time = 10.0,
+        vaccination_fraction = fraction,
+    )
+
+    summary = summary_dataframe(result)
+
+    push!(
+        vaccination_summary,
+        (
+            vaccination_fraction = fraction,
+            peak_I = Float64(summary.peak_I[1]),
+            peak_time = Float64(summary.peak_time[1]),
+            final_S = Float64(summary.final_S[1]),
+            final_I = Float64(summary.final_I[1]),
+            final_R = Float64(summary.final_R[1]),
+            final_size = Float64(summary.final_size[1]),
+        ),
+    )
+end
+
+# ## Анализ фиксированной длительности болезни
+#
+# Здесь меняется фиксированная длительность болезни.
+# Это позволяет сравнить, как форма эпидемической волны зависит от
+# времени нахождения агента в состоянии `I`.
+
+illness_durations = [2.0, 4.0, 6.0, 8.0]
+
+fixed_recovery_summary = DataFrame(
+    illness_duration = Float64[],
+    peak_I = Float64[],
+    peak_time = Float64[],
+    final_S = Float64[],
+    final_I = Float64[],
+    final_R = Float64[],
+    final_size = Float64[],
+)
+
+for illness_duration in illness_durations
+    df = simulate_fixed_recovery(
+        base_params;
+        illness_duration = illness_duration,
+    )
+
+    summary = simple_summary(df, "fixed_recovery")
+
+    push!(
+        fixed_recovery_summary,
+        (
+            illness_duration = illness_duration,
+            peak_I = summary.peak_I[1],
+            peak_time = summary.peak_time[1],
+            final_S = summary.final_S[1],
+            final_I = summary.final_I[1],
+            final_R = summary.final_R[1],
+            final_size = summary.final_size[1],
+        ),
+    )
+end
+
+# ## Анализ демографического сценария
+#
+# В этом блоке изменяется параметр `mu`, который задаёт интенсивность
+# рождения и смерти.
+
+demography_mus = [0.0, 0.002, 0.005, 0.01]
+
+demography_summary = DataFrame(
+    mu = Float64[],
+    peak_I = Float64[],
+    peak_time = Float64[],
+    final_S = Float64[],
+    final_I = Float64[],
+    final_R = Float64[],
+    final_size = Float64[],
+    final_population = Float64[],
+)
+
+for mu in demography_mus
+    df = simulate_sir_demography(base_params; mu = mu)
+    summary = simple_summary(df, "demography")
+
+    push!(
+        demography_summary,
+        (
+            mu = mu,
+            peak_I = summary.peak_I[1],
+            peak_time = summary.peak_time[1],
+            final_S = summary.final_S[1],
+            final_I = summary.final_I[1],
+            final_R = summary.final_R[1],
+            final_size = summary.final_size[1],
+            final_population = Float64(df.S[end] + df.I[end] + df.R[end]),
+        ),
+    )
+end
+
+# ## Анализ SEIR-модели
+#
+# В этом блоке изменяется параметр `sigma`.
+# Он отвечает за скорость перехода из состояния `E` в состояние `I`.
+
+sigma_values = [0.15, 0.25, 0.5, 1.0]
+
+seir_summary = DataFrame(
+    sigma = Float64[],
+    peak_E = Float64[],
+    peak_I = Float64[],
+    peak_time_I = Float64[],
+    final_S = Float64[],
+    final_E = Float64[],
+    final_I = Float64[],
+    final_R = Float64[],
+    final_size = Float64[],
+)
+
+for sigma in sigma_values
+    df = simulate_seir_des(base_params; sigma = sigma)
+
+    peak_E = maximum(df.E)
+    peak_I, peak_index = findmax(df.I)
+    peak_time_I = df.t[peak_index]
+
+    push!(
+        seir_summary,
+        (
+            sigma = sigma,
+            peak_E = Float64(peak_E),
+            peak_I = Float64(peak_I),
+            peak_time_I = Float64(peak_time_I),
+            final_S = Float64(df.S[end]),
+            final_E = Float64(df.E[end]),
+            final_I = Float64(df.I[end]),
+            final_R = Float64(df.R[end]),
+            final_size = Float64(df.R[end]),
+        ),
+    )
+end
+
+# ## Оценка производительности
+#
+# Здесь модель запускается для разных размеров популяции.
+# Для каждого размера измеряется время выполнения.
+
+population_sizes = [500, 1000, 2000, 5000]
+
+performance_summary = DataFrame(
+    population_size = Int[],
+    elapsed_time = Float64[],
+    peak_I = Int[],
+    final_size = Int[],
+    events_count = Int[],
+)
+
+for population_size in population_sizes
+    params = SIRParameters(
+        population_size - 10,
+        10,
+        0,
+        base_params.beta,
+        base_params.c,
+        base_params.gamma,
+        base_params.tmax,
+        7000 + population_size,
+    )
+
+    result = nothing
+
+    elapsed_time = @elapsed begin
+        result = simulate_sir_des(params)
+    end
+
+    summary = summary_dataframe(result)
+
+    push!(
+        performance_summary,
+        (
+            population_size = population_size,
+            elapsed_time = elapsed_time,
+            peak_I = summary.peak_I[1],
+            final_size = summary.final_size[1],
+            events_count = summary.events_count[1],
+        ),
+    )
+end
+
+# ## Сохранение таблиц
+#
+# Все сводные таблицы сохраняются в каталог `data/`.
+
+CSV.write(datadir("sir_des_analysis_params_vaccination.csv"), vaccination_summary)
+CSV.write(datadir("sir_des_analysis_params_fixed_recovery.csv"), fixed_recovery_summary)
+CSV.write(datadir("sir_des_analysis_params_demography.csv"), demography_summary)
+CSV.write(datadir("sir_des_analysis_params_seir.csv"), seir_summary)
+CSV.write(datadir("sir_des_analysis_params_performance.csv"), performance_summary)
+
+println("Vaccination summary:")
+println(vaccination_summary)
+
+println()
+println("Fixed recovery summary:")
+println(fixed_recovery_summary)
+
+println()
+println("Demography summary:")
+println(demography_summary)
+
+println()
+println("SEIR summary:")
+println(seir_summary)
+
+println()
+println("Performance summary:")
+println(performance_summary)
+
+# ## График влияния доли вакцинации
+#
+# На графике сравниваются пик инфекции и итоговый размер эпидемии
+# при разных долях вакцинации.
+
+p_vaccination = plot(
+    vaccination_summary.vaccination_fraction,
+    vaccination_summary.peak_I,
+    marker = :circle,
+    label = "Peak I",
+    xlabel = "Vaccination fraction",
+    ylabel = "Value",
+    title = "SIR DES: vaccination parameter scan",
+    linewidth = 2,
+)
+
+plot!(
+    p_vaccination,
+    vaccination_summary.vaccination_fraction,
+    vaccination_summary.final_size,
+    marker = :circle,
+    label = "Final size",
+    linewidth = 2,
+)
+
+savefig(p_vaccination, plotsdir("sir_des_analysis_params_vaccination.png"))
+
+# ## График влияния фиксированной длительности болезни
+#
+# Этот график показывает, как увеличение фиксированной длительности болезни
+# влияет на пик инфекции и итоговый размер эпидемии.
+
+p_fixed = plot(
+    fixed_recovery_summary.illness_duration,
+    fixed_recovery_summary.peak_I,
+    marker = :circle,
+    label = "Peak I",
+    xlabel = "Illness duration",
+    ylabel = "Value",
+    title = "SIR DES: fixed recovery duration scan",
+    linewidth = 2,
+)
+
+plot!(
+    p_fixed,
+    fixed_recovery_summary.illness_duration,
+    fixed_recovery_summary.final_size,
+    marker = :circle,
+    label = "Final size",
+    linewidth = 2,
+)
+
+savefig(p_fixed, plotsdir("sir_des_analysis_params_fixed_recovery.png"))
+
+# ## График демографического сценария
+#
+# На графике показано влияние параметра демографии `mu`
+# на пик инфекции и финальную численность популяции.
+
+p_demography = plot(
+    demography_summary.mu,
+    demography_summary.peak_I,
+    marker = :circle,
+    label = "Peak I",
+    xlabel = "Mu",
+    ylabel = "Value",
+    title = "SIR DES: demography parameter scan",
+    linewidth = 2,
+)
+
+plot!(
+    p_demography,
+    demography_summary.mu,
+    demography_summary.final_population,
+    marker = :circle,
+    label = "Final population",
+    linewidth = 2,
+)
+
+savefig(p_demography, plotsdir("sir_des_analysis_params_demography.png"))
+
+# ## График SEIR-сценария
+#
+# На графике показано влияние параметра `sigma` на пик скрыто заражённых
+# и пик инфицированных.
+
+p_seir = plot(
+    seir_summary.sigma,
+    seir_summary.peak_E,
+    marker = :circle,
+    label = "Peak E",
+    xlabel = "Sigma",
+    ylabel = "Value",
+    title = "SEIR DES: sigma parameter scan",
+    linewidth = 2,
+)
+
+plot!(
+    p_seir,
+    seir_summary.sigma,
+    seir_summary.peak_I,
+    marker = :circle,
+    label = "Peak I",
+    linewidth = 2,
+)
+
+savefig(p_seir, plotsdir("sir_des_analysis_params_seir.png"))
+
+# ## График производительности
+#
+# Последний график показывает зависимость времени выполнения от размера
+# популяции.
+
+p_performance = plot(
+    performance_summary.population_size,
+    performance_summary.elapsed_time,
+    marker = :circle,
+    label = "Elapsed time",
+    xlabel = "Population size",
+    ylabel = "Elapsed time, seconds",
+    title = "SIR DES: performance parameter scan",
+    linewidth = 2,
+)
+
+savefig(p_performance, plotsdir("sir_des_analysis_params_performance.png"))
+
+# ## Завершение
+#
+# В результате выполнения скрипта сохранены таблицы и графики для
+# параметризованного анализа дополнительных сценариев.
+
+println()
+println("SIR DES analysis parameter scan completed.")
+println("Saved data:")
+println("  data/sir_des_analysis_params_vaccination.csv")
+println("  data/sir_des_analysis_params_fixed_recovery.csv")
+println("  data/sir_des_analysis_params_demography.csv")
+println("  data/sir_des_analysis_params_seir.csv")
+println("  data/sir_des_analysis_params_performance.csv")
+println("Saved plots:")
+println("  plots/sir_des_analysis_params_vaccination.png")
+println("  plots/sir_des_analysis_params_fixed_recovery.png")
+println("  plots/sir_des_analysis_params_demography.png")
+println("  plots/sir_des_analysis_params_seir.png")
+println("  plots/sir_des_analysis_params_performance.png")

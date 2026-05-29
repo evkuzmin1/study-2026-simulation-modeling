@@ -1,0 +1,2 @@
+S0,I0,R0,beta,c,gamma,reproduction_number,tmax,seed,peak_I,peak_time,final_S,final_I,final_R,final_size,epidemic_duration,events_count
+990,10,0,0.05,10.0,0.25,2.0,100.0,123,184,19.28174006954854,164,0,836,836,100.0,1662
